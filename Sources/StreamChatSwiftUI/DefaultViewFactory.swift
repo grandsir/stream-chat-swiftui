@@ -198,12 +198,17 @@ extension ViewFactory {
             return ChatChannelView(
                 viewFactory: self,
                 channelController: channelController,
-                messageController: messageController
+                messageController: messageController,
+                scrollToMessage: message
             )
         }
     }
     
     public func makeMessageListModifier() -> some ViewModifier {
+        EmptyViewModifier()
+    }
+    
+    public func makeMessageListContainerModifier() -> some ViewModifier {
         EmptyViewModifier()
     }
     
@@ -543,6 +548,26 @@ extension ViewFactory {
         }
     }
     
+    public func makeComposerTextInputView(
+        text: Binding<String>,
+        height: Binding<CGFloat>,
+        selectedRangeLocation: Binding<Int>,
+        placeholder: String,
+        editable: Bool,
+        maxMessageLength: Int?,
+        currentHeight: CGFloat
+    ) -> some View {
+        ComposerTextInputView(
+            text: text,
+            height: height,
+            selectedRangeLocation: selectedRangeLocation,
+            placeholder: placeholder,
+            editable: editable,
+            maxMessageLength: maxMessageLength,
+            currentHeight: currentHeight
+        )
+    }
+    
     public func makeTrailingComposerView(
         enabled: Bool,
         cooldownDuration: Int,
@@ -721,6 +746,20 @@ extension ViewFactory {
         )
     }
     
+    public func makeBottomReactionsView(
+        message: ChatMessage,
+        showsAllInfo: Bool,
+        onTap: @escaping () -> Void,
+        onLongPress: @escaping () -> Void
+    ) -> some View {
+        BottomReactionsView(
+            message: message,
+            showsAllInfo: showsAllInfo,
+            onTap: onTap,
+            onLongPress: onLongPress
+        )
+    }
+    
     public func makeMessageReactionView(
         message: ChatMessage,
         onTapGesture: @escaping () -> Void,
@@ -790,6 +829,10 @@ extension ViewFactory {
             forceLeftToRight: isInComposer,
             scrolledId: scrolledId
         )
+    }
+    
+    public func makeCustomAttachmentQuotedView(for message: ChatMessage) -> some View {
+        EmptyView()
     }
     
     public func makeEditedMessageHeaderView(

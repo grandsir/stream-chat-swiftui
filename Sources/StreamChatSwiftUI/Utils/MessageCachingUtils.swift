@@ -17,6 +17,15 @@ class MessageCachingUtils {
     private var quotedMessageMapping = [String: ChatMessage]()
 
     var scrollOffset: CGFloat = 0
+    var messageThreadShown = false {
+        didSet {
+            if !messageThreadShown {
+                jumpToReplyId = nil
+            }
+        }
+    }
+    
+    var jumpToReplyId: String?
 
     func authorId(for message: ChatMessage) -> String {
         if let userDisplayInfo = userDisplayInfo(for: message) {
@@ -85,6 +94,7 @@ class MessageCachingUtils {
     func clearCache() {
         log.debug("Clearing cached message data")
         scrollOffset = 0
+        messageThreadShown = false
         messageAuthorMapping = [String: String]()
         messageAuthors = [String: UserDisplayInfo]()
         messageAttachments = [String: Bool]()

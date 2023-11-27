@@ -130,6 +130,9 @@ open class MessageComposerViewModel: ObservableObject {
     
     private var timer: Timer?
     private var cooldownPeriod = 0
+    private var isSlowModeDisabled: Bool {
+        channelController.channel?.ownCapabilities.contains("skip-slow-mode") == true
+    }
     
     private var cancellables = Set<AnyCancellable>()
     private lazy var commandsHandler = utils
@@ -138,7 +141,7 @@ open class MessageComposerViewModel: ObservableObject {
             with: channelController
         )
     
-    private(set) var mentionedUsers = Set<ChatUser>()
+    public var mentionedUsers = Set<ChatUser>()
     
     private var messageText: String {
         if let composerCommand = composerCommand,
@@ -171,11 +174,21 @@ open class MessageComposerViewModel: ObservableObject {
         self.channelController = channelController
         self.messageController = messageController
         listenToCooldownUpdates()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
     }
     
     public func sendMessage(
         quotedMessage: ChatMessage?,
         editedMessage: ChatMessage?,
+        isSilent: Bool = false,
+        skipPush: Bool = false,
+        skipEnrichUrl: Bool = false,
+        extraData: [String: RawJSON] = [:],
         completion: @escaping () -> Void
     ) {
         defer {
@@ -220,7 +233,11 @@ open class MessageComposerViewModel: ObservableObject {
                     attachments: attachments,
                     mentionedUserIds: mentionedUserIds,
                     showReplyInChannel: showReplyInChannel,
-                    quotedMessageId: quotedMessage?.id
+                    isSilent: isSilent,
+                    quotedMessageId: quotedMessage?.id,
+                    skipPush: skipPush,
+                    skipEnrichUrl: skipEnrichUrl,
+                    extraData: extraData
                 ) { [weak self] in
                     switch $0 {
                     case .success:
@@ -232,9 +249,13 @@ open class MessageComposerViewModel: ObservableObject {
             } else {
                 channelController.createNewMessage(
                     text: messageText,
+                    isSilent: isSilent,
                     attachments: attachments,
                     mentionedUserIds: mentionedUserIds,
-                    quotedMessageId: quotedMessage?.id
+                    quotedMessageId: quotedMessage?.id,
+                    skipPush: skipPush,
+                    skipEnrichUrl: skipEnrichUrl,
+                    extraData: extraData
                 ) { [weak self] in
                     switch $0 {
                     case .success:
@@ -384,16 +405,12 @@ open class MessageComposerViewModel: ObservableObject {
     }
     
     public func askForPhotosPermission() {
-        PHPhotoLibrary.requestAuthorization { (status) in
+        PHPhotoLibrary.requestAuthorization { [weak self] (status) in
+            guard let self else { return }
             switch status {
             case .authorized, .limited:
                 log.debug("Access to photos granted.")
-                let fetchOptions = PHFetchOptions()
-                fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-                let assets = PHAsset.fetchAssets(with: fetchOptions)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-                    self?.imageAssets = assets
-                }
+                self.fetchAssets()
             case .denied, .restricted, .notDetermined:
                 DispatchQueue.main.async { [weak self] in
                     self?.imageAssets = PHFetchResult<PHAsset>()
@@ -426,6 +443,25 @@ open class MessageComposerViewModel: ObservableObject {
     
     // MARK: - private
     
+    private func fetchAssets() {
+        let fetchOptions = PHFetchOptions()
+        let supportedTypes = utils.composerConfig.gallerySupportedTypes
+        var predicate: NSPredicate?
+        if supportedTypes == .images {
+            predicate = NSPredicate(format: "mediaType = \(PHAssetMediaType.image.rawValue)")
+        } else if supportedTypes == .videos {
+            predicate = NSPredicate(format: "mediaType = \(PHAssetMediaType.video.rawValue)")
+        }
+        if let predicate {
+            fetchOptions.predicate = predicate
+        }
+        fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        let assets = PHAsset.fetchAssets(with: fetchOptions)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            self?.imageAssets = assets
+        }
+    }
+    
     private func checkForMentionedUsers(
         commandId: String?,
         extraData: [String: Any]
@@ -457,7 +493,10 @@ open class MessageComposerViewModel: ObservableObject {
             messageId: message.id
         )
         
-        messageController.editMessage(text: adjustedText) { [weak self] error in
+        messageController.editMessage(
+            text: adjustedText,
+            attachments: utils.composerConfig.attachmentPayloadConverter(message)
+        ) { [weak self] error in
             if error != nil {
                 self?.errorShown = true
             } else {
@@ -521,6 +560,7 @@ open class MessageComposerViewModel: ObservableObject {
     
     private func listenToCooldownUpdates() {
         channelController.channelChangePublisher.sink { [weak self] _ in
+            guard self?.isSlowModeDisabled == false else { return }
             let cooldownDuration = self?.channelController.channel?.cooldownDuration ?? 0
             if self?.cooldownPeriod == cooldownDuration {
                 return
@@ -533,7 +573,7 @@ open class MessageComposerViewModel: ObservableObject {
     
     private func checkChannelCooldown() {
         let duration = channelController.channel?.cooldownDuration ?? 0
-        if duration > 0 && timer == nil {
+        if duration > 0 && timer == nil && !isSlowModeDisabled {
             cooldownDuration = duration
             timer = Timer.scheduledTimer(
                 withTimeInterval: 1,
@@ -579,6 +619,13 @@ open class MessageComposerViewModel: ObservableObject {
             return canAdd
         } catch {
             return false
+        }
+    }
+    
+    @objc
+    private func applicationWillEnterForeground() {
+        if (imageAssets?.count ?? 0) > 0 {
+            fetchAssets()
         }
     }
 }

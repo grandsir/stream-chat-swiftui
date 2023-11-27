@@ -22,7 +22,7 @@ public struct ChatChannelView<Factory: ViewFactory>: View, KeyboardReadable {
     private var factory: Factory
 
     public init(
-        viewFactory: Factory,
+        viewFactory: Factory = DefaultViewFactory.shared,
         viewModel: ChatChannelViewModel? = nil,
         channelController: ChatChannelController,
         messageController: ChatMessageController? = nil,
@@ -55,14 +55,17 @@ public struct ChatChannelView<Factory: ViewFactory>: View, KeyboardReadable {
                             listId: viewModel.listId,
                             isMessageThread: viewModel.isMessageThread,
                             shouldShowTypingIndicator: viewModel.shouldShowTypingIndicator,
-                            onMessageAppear: viewModel.handleMessageAppear(index:),
+                            scrollPosition: $viewModel.scrollPosition,
+                            loadingNextMessages: viewModel.loadingNextMessages,
+                            onMessageAppear: viewModel.handleMessageAppear(index:scrollDirection:),
                             onScrollToBottom: viewModel.scrollToLastMessage,
                             onLongPress: { displayInfo in
                                 messageDisplayInfo = displayInfo
                                 withAnimation {
                                     viewModel.showReactionOverlay(for: AnyView(self))
                                 }
-                            }
+                            },
+                            onJumpToMessage: viewModel.jumpToMessage(messageId:)
                         )
                         .overlay(
                             viewModel.currentDateString != nil ?
@@ -86,6 +89,9 @@ public struct ChatChannelView<Factory: ViewFactory>: View, KeyboardReadable {
                         .if(viewModel.reactionsShown, transform: { view in
                             view.navigationBarHidden(true)
                         })
+                        .if(!viewModel.reactionsShown, transform: { view in
+                            view.navigationBarHidden(false)
+                        })
                         .if(viewModel.channelHeaderType == .regular) { view in
                             view.modifier(factory.makeChannelHeaderViewModifier(for: channel))
                         }
@@ -95,6 +101,7 @@ public struct ChatChannelView<Factory: ViewFactory>: View, KeyboardReadable {
                         .if(viewModel.channelHeaderType == .messageThread) { view in
                             view.modifier(factory.makeMessageThreadHeaderViewModifier())
                         }
+                        .animation(nil)
 
                     factory.makeMessageComposerViewType(
                         with: viewModel.channelController,
@@ -105,7 +112,7 @@ public struct ChatChannelView<Factory: ViewFactory>: View, KeyboardReadable {
                     )
                     .opacity((
                         utils.messageListConfig.messagePopoverEnabled && messageDisplayInfo != nil && !viewModel
-                            .reactionsShown
+                            .reactionsShown && viewModel.channel?.isFrozen == false
                     ) ? 0 : 1)
 
                     NavigationLink(
@@ -179,6 +186,7 @@ public struct ChatChannelView<Factory: ViewFactory>: View, KeyboardReadable {
         )
         .padding(.bottom, keyboardShown || !tabBarAvailable || generatingSnapshot ? 0 : bottomPadding)
         .ignoresSafeArea(.container, edges: tabBarAvailable ? .bottom : [])
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("ChatChannelView")
     }
 
